@@ -4,16 +4,18 @@ import upload from './config/multer.js';
 import { Queue } from 'bullmq';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { QdrantVectorStore } from '@langchain/qdrant';
-import OpenAI from 'openai';
+import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { worker } from './worker.js';
 import { geminiApiKey } from './config/config.js';
 
- 
 
-
-const client = new OpenAI({
-  apiKey: '',
+const llm = new ChatGoogleGenerativeAI({
+  model: "gemini-1.5-flash",
+  temperature: 0,
+  maxRetries: 2,
+  apiKey: geminiApiKey
 });
+
 const queue = new Queue('file-upload-queue', {
   connection: {
     host: 'localhost',
@@ -54,11 +56,16 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
 
 app.get('/chat', async (req, res) => {
   const userQuery = req.query.message;
+  console.log('User Query:', userQuery);
+  
 
-  const embeddings = new OpenAIEmbeddings({
-    model: 'text-embedding-3-small',
-    apiKey: '',
+  const embeddings = new GoogleGenerativeAIEmbeddings({
+    modelName: "gemini-embedding-exp-03-07",
+    title: "User uploaded document",
+    taskType: "RETRIEVAL_DOCUMENT",
+    apiKey: geminiApiKey,
   });
+
   const vectorStore = await QdrantVectorStore.fromExistingCollection(
     embeddings,
     {
@@ -72,21 +79,20 @@ app.get('/chat', async (req, res) => {
   const result = await ret.invoke(userQuery);
 
   const SYSTEM_PROMPT = `
-  You are helfull AI Assistant who answeres the user query based on the available context from PDF File.
+  You are a helpful AI Assistant who answers the user query based on the available context from PDF File.
   Context:
   ${JSON.stringify(result)}
+  
+  User Question: ${userQuery}
+  
+  Please provide a helpful answer based on the context above.
   `;
 
-  const chatResult = await client.chat.completions.create({
-    model: 'gpt-4.1',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userQuery },
-    ],
-  });
+  const chatResult = await llm.invoke(SYSTEM_PROMPT);
+  console.log('Chat Result:', chatResult.content);
 
   return res.json({
-    message: chatResult.choices[0].message.content,
+    message: chatResult.content,
     docs: result,
   });
 });
@@ -94,4 +100,4 @@ app.get('/chat', async (req, res) => {
 app.listen(8000, () => {
   console.log(`Server started on PORT:${8000}`);
   console.log('Worker is active and ready to process jobs');
-});
+}); 

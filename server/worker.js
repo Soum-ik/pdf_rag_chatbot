@@ -15,21 +15,25 @@ export const worker = new Worker(
       console.log(`Job:`, job.data);
       const data = JSON.parse(job.data);
 
-      // Load the PDF
-      console.log('Loading PDF from path:', data.path);
       const loader = new PDFLoader(data.path);
       const docs = await loader.load();
-      console.log(`Loaded ${docs.length} documents from PDF`);
 
-      // Split the documents into chunks
-      const textSplitter = new CharacterTextSplitter({
-        chunkSize: 500,
-        chunkOverlap: 200,
-      });
-      console.log('Splitting documents into chunks...');
-      const splitDocs = await textSplitter.splitDocuments(docs);
-      console.log(`Split into ${splitDocs.length} chunks`);
+      // // Split the documents into chunks
+      // const textSplitter = new CharacterTextSplitter({
+      //   chunkSize: 1000,
+      //   chunkOverlap: 200,
+      // });
 
+      // const splitDocs = await textSplitter.splitDocuments(docs);
+      // const validDocs = splitDocs.filter(doc =>
+      //   doc.pageContent &&
+      //   typeof doc.pageContent === 'string' &&
+      //   doc.pageContent.trim().length > 0
+      // );
+      // console.log(`Valid documents: ${validDocs.length} out of ${splitDocs.length}`);
+      // if (validDocs.length === 0) {
+      //   throw new Error('No valid documents to embed');
+      // }
       // Initialize embeddings
       try {
         console.log('Initializing Google Generative AI Embeddings...');
@@ -39,10 +43,26 @@ export const worker = new Worker(
           taskType: "RETRIEVAL_DOCUMENT",
           apiKey: geminiApiKey,
         });
-        console.log('Embedding model initialized:', embeddings.modelName);
+        // Embed manually
+        // console.log('Generating embeddings...');
+        // const texts = validDocs.map(doc => doc.pageContent);
+        // const vectors = await embeddings.embedDocuments(texts);
+        // // Validate vectors (must be arrays of 3072 floats)
+        // const filtered = vectors
+        //   .map((vec, i) => ({ vec, doc: validDocs[i] }))
+        //   .filter(item =>
+        //     Array.isArray(item.vec) &&
+        //     item.vec.length === 3072 &&
+        //     item.vec.every(v => typeof v === 'number' && !isNaN(v))
+        //   );
 
-        // Connect to vector store
-        console.log('Connecting to Qdrant vector store...');
+        // if (filtered.length === 0) {
+        //   throw new Error('All embeddings are invalid (empty or wrong dimensions)');
+        // }
+
+        // console.log(`Prepared ${filtered.length} valid embeddings`);
+
+        // Connect to Qdrant
         const vectorStore = await QdrantVectorStore.fromExistingCollection(
           embeddings,
           {
@@ -50,13 +70,12 @@ export const worker = new Worker(
             collectionName: 'langchainjs-testing',
           }
         );
-        console.log('Connected to vector store successfully');
 
-        // Add documents to vector store
-        console.log('Adding documents to vector store...');
-        await vectorStore.addDocuments(splitDocs);
-        console.log(`Successfully added ${splitDocs.length} documents to vector store`);
+        console.log('Connected to Qdrant, uploading vectors...');
 
+        // Add vectors manually
+        await vectorStore.addDocuments(docs);
+        console.log('Vectors uploaded successfully');
       } catch (embeddingError) {
         console.error('Error with embeddings or vector store:', embeddingError);
         throw embeddingError;
@@ -69,6 +88,10 @@ export const worker = new Worker(
     }
   },
   {
+    autorun: true,
+    removeOnFail: true,
+    retryProcessDelay: 1000,
+    maxRetries: 3,
     concurrency: 100,
     connection: {
       host: 'localhost',
