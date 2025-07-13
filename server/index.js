@@ -2,19 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import upload from './config/multer.js';
 import { Queue } from 'bullmq';
-import { OpenAIEmbeddings } from '@langchain/openai';
 import { QdrantVectorStore } from '@langchain/qdrant';
-import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { Mistral } from '@mistralai/mistralai';
 import { worker } from './worker.js';
-import { geminiApiKey } from './config/config.js';
+import { mistralApiKey, geminiApiKey } from './config/config.js';
 
-
-const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-1.5-flash",
-  temperature: 0,
-  maxRetries: 2,
-  apiKey: geminiApiKey
-});
+const mistralClient = new Mistral({ apiKey: mistralApiKey });
 
 const queue = new Queue('file-upload-queue', {
   connection: {
@@ -55,49 +49,95 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
 });
 
 app.get('/chat', async (req, res) => {
-  const userQuery = req.query.message;
-  console.log('User Query:', userQuery);
-  
+  try {
+    const userQuery = req.query.message;
+    console.log('User Query:', userQuery);
 
-  const embeddings = new GoogleGenerativeAIEmbeddings({
-    modelName: "gemini-embedding-exp-03-07",
-    title: "User uploaded document",
-    taskType: "RETRIEVAL_DOCUMENT",
-    apiKey: geminiApiKey,
-  });
+    try {
+      const embeddings = new GoogleGenerativeAIEmbeddings({
+        modelName: "gemini-embedding-exp-03-07",
+        title: "User uploaded document",
+        taskType: "RETRIEVAL_DOCUMENT",
+        apiKey: geminiApiKey,
+      });
 
-  const vectorStore = await QdrantVectorStore.fromExistingCollection(
-    embeddings,
-    {
-      url: 'http://localhost:6333',
-      collectionName: 'langchainjs-testing',
+      try {
+        const vectorStore = await QdrantVectorStore.fromExistingCollection(
+          embeddings,
+          {
+            url: 'http://localhost:6333',
+            collectionName: 'langchainjs-testing',
+          }
+        );
+
+        const ret = vectorStore.asRetriever({
+          k: 2,
+        });
+
+        const result = await ret.invoke(userQuery);
+        console.log('Retrieved documents count:', result.length);
+
+        if (!result || result.length === 0) {
+          return res.status(404).json({
+            error: 'No relevant documents found for your query.'
+          });
+        }
+
+        const documentContents = result.map(doc => {
+          return `Document Content: ${doc.pageContent || 'No content available'}`;
+        }).join('\r\n\r\n');
+        
+
+        const SYSTEM_PROMPT = `
+        You are a helpful AI Assistant who answers the user query based on the available context from PDF File.
+        
+        Context:
+        ${documentContents}
+        User Query: ${userQuery}
+        Answer the user query based on the context provided.
+        `;
+
+        try {
+          const chatResponse = new ChatGoogleGenerativeAI({
+            model: "gemini-1.5-flash",
+            temperature: 0,
+            maxRetries: 2,
+            apiKey: geminiApiKey,
+          });
+
+          const result = await chatResponse.invoke(SYSTEM_PROMPT);
+          console.log('Chat response:', result);
+          return res.json({
+            message: result.content,
+            docs: result.content,
+          });
+        } catch (llmError) {
+          console.error('Error generating response from LLM:', llmError);
+          return res.status(500).json({
+            error: 'Failed to generate a response. Please try again later.'
+          });
+        }
+      } catch (vectorStoreError) {
+        console.error('Error retrieving documents from vector store:', vectorStoreError);
+        return res.status(500).json({
+          error: 'Failed to retrieve relevant documents. Please try again later.'
+        });
+      }
+    } catch (embeddingError) {
+      console.error('Error initializing embeddings:', embeddingError);
+      return res.status(500).json({
+        error: 'Failed to initialize embedding model. Please check your API key and try again.'
+      });
     }
-  );
-  const ret = vectorStore.asRetriever({
-    k: 2,
-  });
-  const result = await ret.invoke(userQuery);
-
-  const SYSTEM_PROMPT = `
-  You are a helpful AI Assistant who answers the user query based on the available context from PDF File.
-  Context:
-  ${JSON.stringify(result)}
-  
-  User Question: ${userQuery}
-  
-  Please provide a helpful answer based on the context above.
-  `;
-
-  const chatResult = await llm.invoke(SYSTEM_PROMPT);
-  console.log('Chat Result:', chatResult.content);
-
-  return res.json({
-    message: chatResult.content,
-    docs: result,
-  });
+  } catch (error) {
+    console.error('Unexpected error in chat endpoint:', error);
+    return res.status(500).json({
+      error: 'An unexpected error occurred. Please try again later.'
+    });
+  }
 });
 
 app.listen(8000, () => {
   console.log(`Server started on PORT:${8000}`);
   console.log('Worker is active and ready to process jobs');
-}); 
+});

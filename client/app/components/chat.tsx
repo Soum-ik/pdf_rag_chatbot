@@ -7,7 +7,7 @@ import * as React from 'react';
 
 interface Doc {
   pageContent?: string;
-  metdata?: {
+  metadata?: {
     loc?: {
       pageNumber?: number;
     };
@@ -25,14 +25,23 @@ const ChatComponent: React.FC = () => {
   const [messages, setMessages] = React.useState<IMessage[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  // Add state to track if component is mounted (client-side only)
+  const [isMounted, setIsMounted] = React.useState(false);
+
+  // Use useEffect to mark component as mounted after hydration
+  React.useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   React.useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (isMounted) {
+      scrollToBottom();
+    }
+  }, [messages, isMounted]);
 
   const handleSendChatMessage = async () => {
     if (!message.trim()) return;
@@ -48,6 +57,7 @@ const ChatComponent: React.FC = () => {
         `http://localhost:8000/chat?message=${encodeURIComponent(userMessage)}`
       );
       const data = await res.json();
+      console.log('Chat response data:', data);
 
       setMessages((prev) => [
         ...prev,
@@ -77,6 +87,11 @@ const ChatComponent: React.FC = () => {
       handleSendChatMessage();
     }
   };
+
+  // Only render the actual UI content after client-side hydration is complete
+  if (!isMounted) {
+    return <div className="flex flex-col h-[calc(100vh-80px)] p-6"></div>; // Simple placeholder during SSR
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] p-6">
@@ -136,13 +151,13 @@ const ChatComponent: React.FC = () => {
                           <FileText className="w-3 h-3" />
                           Source References:
                         </div>
-                        {msg.documents.slice(0, 2).map((doc, docIndex) => (
+                        {(Array.isArray(msg.documents) ? msg.documents : []).slice(0, 2).map((doc, docIndex) => (
                           <div
                             key={docIndex}
                             className="glass rounded-lg p-3 text-xs text-slate-300 border border-slate-600/30"
                           >
                             <div className="font-medium mb-1 text-sky-300">
-                              Page {doc.metdata?.loc?.pageNumber || 'Unknown'}
+                              Page {doc.metadata?.loc?.pageNumber || 'Unknown'}
                             </div>
                             <div className="line-clamp-3 text-slate-400">
                               {doc.pageContent?.substring(0, 150)}...

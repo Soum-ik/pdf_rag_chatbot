@@ -1,7 +1,6 @@
 import { Worker } from 'bullmq';
-import { OpenAIEmbeddings } from '@langchain/openai';
 import { QdrantVectorStore } from '@langchain/qdrant';
-import { Document } from '@langchain/core/documents';
+import { QdrantClient } from '@qdrant/js-client-rest';
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { CharacterTextSplitter } from '@langchain/textsplitters';
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
@@ -17,23 +16,8 @@ export const worker = new Worker(
 
       const loader = new PDFLoader(data.path);
       const docs = await loader.load();
+      console.log(`Loaded ${docs.length} documents from PDF`);
 
-      // // Split the documents into chunks
-      // const textSplitter = new CharacterTextSplitter({
-      //   chunkSize: 1000,
-      //   chunkOverlap: 200,
-      // });
-
-      // const splitDocs = await textSplitter.splitDocuments(docs);
-      // const validDocs = splitDocs.filter(doc =>
-      //   doc.pageContent &&
-      //   typeof doc.pageContent === 'string' &&
-      //   doc.pageContent.trim().length > 0
-      // );
-      // console.log(`Valid documents: ${validDocs.length} out of ${splitDocs.length}`);
-      // if (validDocs.length === 0) {
-      //   throw new Error('No valid documents to embed');
-      // }
       // Initialize embeddings
       try {
         console.log('Initializing Google Generative AI Embeddings...');
@@ -43,39 +27,65 @@ export const worker = new Worker(
           taskType: "RETRIEVAL_DOCUMENT",
           apiKey: geminiApiKey,
         });
-        // Embed manually
-        // console.log('Generating embeddings...');
-        // const texts = validDocs.map(doc => doc.pageContent);
-        // const vectors = await embeddings.embedDocuments(texts);
-        // // Validate vectors (must be arrays of 3072 floats)
-        // const filtered = vectors
-        //   .map((vec, i) => ({ vec, doc: validDocs[i] }))
-        //   .filter(item =>
-        //     Array.isArray(item.vec) &&
-        //     item.vec.length === 3072 &&
-        //     item.vec.every(v => typeof v === 'number' && !isNaN(v))
-        //   );
 
-        // if (filtered.length === 0) {
-        //   throw new Error('All embeddings are invalid (empty or wrong dimensions)');
-        // }
+        // Get vector dimension for this embedding model (should be 3072 for Gemini)
+        console.log('Checking embedding dimensions...');
+        const sampleText = "Sample text for dimension check";
+        const sampleEmbedding = await embeddings.embedQuery(sampleText);
+        const dimension = sampleEmbedding.length;
+        console.log(`Embedding dimension: ${dimension}`);
 
-        // console.log(`Prepared ${filtered.length} valid embeddings`);
-
-        // Connect to Qdrant
-        const vectorStore = await QdrantVectorStore.fromExistingCollection(
-          embeddings,
-          {
-            url: 'http://localhost:6333',
-            collectionName: 'langchainjs-testing',
+        // Connect to Qdrant and check/recreate collection if necessary
+        const qdrantClient = new QdrantClient({ url: 'http://localhost:6333' });
+        
+        try {
+          // Check if collection exists
+          console.log('Checking Qdrant collection...');
+          let collection = null;
+          try {
+            collection = await qdrantClient.getCollection('langchainjs-testing');
+            console.log('Collection exists');
+          } catch (err) {
+            console.log('Collection does not exist, will create it');
           }
-        );
-
-        console.log('Connected to Qdrant, uploading vectors...');
-
-        // Add vectors manually
-        await vectorStore.addDocuments(docs);
-        console.log('Vectors uploaded successfully');
+          
+          // If collection exists but dimensions don't match, delete it
+          if (collection && collection.config.params.vectors.size !== dimension) {
+            console.log(`Collection dimension mismatch: expected ${dimension}, got ${collection.config.params.vectors.size}`);
+            console.log('Deleting existing collection...');
+            await qdrantClient.deleteCollection('langchainjs-testing');
+            collection = null;
+          }
+          
+          // Create collection if it doesn't exist
+          if (!collection) {
+            console.log(`Creating new collection with dimension ${dimension}...`);
+            await qdrantClient.createCollection('langchainjs-testing', {
+              vectors: {
+                size: dimension,
+                distance: 'Cosine'
+              }
+            });
+            console.log('Collection created successfully');
+          }
+          
+          // Create a new vector store and add documents
+          console.log('Creating vector store and adding documents...');
+          const vectorStore = await QdrantVectorStore.fromDocuments(
+            docs,
+            embeddings,
+            {
+              url: 'http://localhost:6333',
+              collectionName: 'langchainjs-testing',
+            }
+          );
+          
+          console.log('Documents successfully added to vector store');
+          
+        } catch (qdrantError) {
+          console.error('Error with Qdrant operations:', qdrantError);
+          throw qdrantError;
+        }
       } catch (embeddingError) {
         console.error('Error with embeddings or vector store:', embeddingError);
         throw embeddingError;

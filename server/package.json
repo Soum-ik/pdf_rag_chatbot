@@ -17,6 +17,7 @@
     "@langchain/openai": "^0.5.5",
     "@langchain/qdrant": "^0.1.2",
     "@langchain/textsplitters": "^0.1.0",
+    "@mistralai/mistralai": "^1.7.4",
     "bullmq": "^5.49.0",
     "cors": "^2.8.5",
     "dotenv": "^17.0.1",

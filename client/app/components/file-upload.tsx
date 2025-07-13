@@ -1,6 +1,6 @@
-'use client';
-import * as React from 'react';
-import { Upload, FileText, CheckCircle, Loader2 } from 'lucide-react';
+"use client";
+import * as React from "react";
+import { Upload, FileText, CheckCircle, Loader2 } from "lucide-react";
 
 const FileUploadComponent: React.FC = () => {
   const [isDragging, setIsDragging] = React.useState(false);
@@ -11,20 +11,23 @@ const FileUploadComponent: React.FC = () => {
   const handleFileUpload = async (file: File) => {
     setIsUploading(true);
     setUploadSuccess(false);
-    
+
+    // Store PDF name in localStorage
+    localStorage.setItem("uploadedPdfName", file.name);
+
     try {
       const formData = new FormData();
-      formData.append('pdf', file);
+      formData.append("pdf", file);
 
-      await fetch('http://localhost:8000/upload/pdf', {
-        method: 'POST',
+      await fetch("http://localhost:8000/upload/pdf", {
+        method: "POST",
         body: formData,
       });
-      
+
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (error) {
-      console.error('Upload failed:', error);
+      console.error("Upload failed:", error);
     } finally {
       setIsUploading(false);
     }
@@ -54,9 +57,9 @@ const FileUploadComponent: React.FC = () => {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
+    if (file && file.type === "application/pdf") {
       handleFileUpload(file);
     }
   };
@@ -69,8 +72,14 @@ const FileUploadComponent: React.FC = () => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`glass glass-hover cursor-pointer rounded-2xl p-8 text-center text-white transition-all duration-300 animate-float ${
-          isDragging ? 'scale-105 border-sky-400/50 shadow-lg shadow-sky-500/25' : ''
-        } ${uploadSuccess ? 'border-emerald-400/50 shadow-lg shadow-emerald-500/25' : ''}`}
+          isDragging
+            ? "scale-105 border-sky-400/50 shadow-lg shadow-sky-500/25"
+            : ""
+        } ${
+          uploadSuccess
+            ? "border-emerald-400/50 shadow-lg shadow-emerald-500/25"
+            : ""
+        }`}
       >
         <div className="flex flex-col items-center space-y-4">
           {isUploading ? (
@@ -83,20 +92,23 @@ const FileUploadComponent: React.FC = () => {
               <Upload className="w-6 h-6 text-sky-400 absolute -top-2 -right-2" />
             </div>
           )}
-          
+
           <div>
-            <h3 className="text-xl font-semibold mb-2 gradient-text">
-              {isUploading ? 'Uploading...' : uploadSuccess ? 'Upload Complete!' : 'Upload PDF'}
-            </h3>
-            <p className="text-sm text-slate-300">
-              {isUploading 
-                ? 'Processing your document...' 
-                : uploadSuccess 
-                ? 'Ready to chat with your document!' 
-                : 'Drag & drop or click to select'}
-            </p>
+            {localStorage.getItem("uploadedPdfName") ? (
+              <h1 className="text-xl font-semibold mb-2 gradient-text">
+                {localStorage.getItem("uploadedPdfName")}
+              </h1>
+            ) : (
+              <h3 className="text-xl font-semibold mb-2 gradient-text">
+                {isUploading
+                  ? "Processing your document..."
+                  : uploadSuccess
+                  ? "Ready to chat with your document!"
+                  : "Drag & drop or click to select"}
+              </h3>
+            )}
           </div>
-          
+
           {!isUploading && !uploadSuccess && (
             <div className="text-xs text-slate-400 mt-2">
               PDF files only • Max 10MB
@@ -104,7 +116,7 @@ const FileUploadComponent: React.FC = () => {
           )}
         </div>
       </div>
-      
+
       <input
         ref={fileInputRef}
         type="file"
