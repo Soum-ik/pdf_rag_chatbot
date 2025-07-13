@@ -1,3 +1,5 @@
+'use client';
+
 import FileUploadComponent from './components/file-upload';
 import ChatComponent from './components/chat';
 
